@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>승급심사</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+<style>
+  :root{
+    --bg:#0e0f14; --panel:#171922; --panel-soft:#1e2030; --ink:#f2f3f7; --sub:#9aa0b4;
+    --line:#2a2d3d; --accent:#ffd400; --ok:#3ddc84; --danger:#ff5a6e;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Malgun Gothic',sans-serif;}
+  .wrap{max-width:680px;margin:0 auto;padding:16px 14px 130px;}
+  h1{font-size:20px;margin:6px 0 2px;}
+  h2{font-size:15px;margin:0 0 8px;}
+  .sub{font-size:13px;color:var(--sub);margin-bottom:14px;line-height:1.5;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;}
+  .field label{display:block;font-size:12px;color:var(--sub);margin-bottom:4px;}
+  input[type="month"], input[type="text"]{
+    width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--line);
+    background:var(--panel-soft);color:var(--ink);font-size:14px;
+  }
+  .row-inline{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;}
+  .btn{
+    padding:11px 14px;border-radius:10px;border:none;font-weight:800;font-size:13px;
+    cursor:pointer;color:#111;background:var(--accent);
+  }
+  .btn.ghost{ background:transparent;border:1px solid var(--line);color:var(--ink); }
+  .btn.ok{ background:var(--ok); }
+  .btn.small{ padding:7px 10px;font-size:12px; }
+  .file-btn{
+    display:inline-block;padding:11px 14px;border-radius:10px;background:var(--panel-soft);
+    border:1px dashed var(--line);color:var(--ink);font-size:13px;cursor:pointer;text-align:center;
+  }
+  input[type="file"]{ display:none; }
+  .summary{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--sub);margin:10px 0 6px;flex-wrap:wrap;gap:8px;}
+  .summary b{color:var(--accent);font-size:14px;}
+  .toolbar{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;}
+  .stu-row{
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:11px 12px;margin-bottom:8px;
+  }
+  .stu-row.pass{ border-color:rgba(61,220,132,0.55); }
+  .stu-row.invalid{ border-color:rgba(255,90,110,0.7); }
+  .stu-top{display:flex;align-items:center;gap:10px;}
+  .stu-name{font-size:15px;font-weight:800;flex:1;}
+  .name-edit{
+    flex:1;font-size:15px;font-weight:800;background:transparent;border:1px solid transparent;
+    border-radius:8px;padding:5px 6px;color:var(--ink);min-width:0;
+  }
+  .name-edit:focus{ border-color:var(--line);background:var(--panel-soft); }
+  .del-btn{
+    flex-shrink:0;width:26px;height:26px;border-radius:8px;border:1px solid var(--line);
+    background:transparent;color:var(--danger);font-size:16px;line-height:1;cursor:pointer;
+  }
+  .pass-toggle{
+    display:flex;align-items:center;gap:6px;padding:7px 10px;border-radius:999px;
+    border:2px solid var(--line);font-size:12px;font-weight:800;cursor:pointer;user-select:none;
+    flex-shrink:0;color:var(--sub);
+  }
+  .pass-toggle.on{ border-color:var(--ok);color:var(--ok);background:rgba(61,220,132,0.12); }
+  .stu-belt-line{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;}
+  .stu-belt-line .arrow{color:var(--sub);font-size:13px;}
+  .belt-edit{max-width:150px;}
+  .next-belt{font-size:13px;font-weight:800;color:var(--sub);padding:5px 10px;border-radius:8px;background:var(--panel-soft);}
+  .next-belt.active{ color:var(--ok); }
+  .err-msg{font-size:11px;color:var(--danger);margin-top:4px;}
+  .empty-state{text-align:center;color:var(--sub);font-size:13px;padding:30px 10px;}
+  .bottom-bar{
+    position:fixed;left:0;right:0;bottom:0;background:linear-gradient(180deg,transparent,var(--bg) 25%);
+    padding:14px 14px 18px;display:flex;gap:8px;max-width:680px;margin:0 auto;
+  }
+  .bottom-bar .btn{flex:1;}
+  .cal-head{display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:10px;font-size:15px;}
+  .cal-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+  .cal-cell{
+    padding:9px 4px;border-radius:10px;border:1px solid var(--line);background:var(--panel-soft);
+    color:var(--sub);text-align:center;cursor:pointer;font-size:13px;font-weight:800;user-select:none;
+  }
+  .cal-cell .cnt{font-size:11px;font-weight:600;margin-top:2px;}
+  .cal-cell.has{border-color:rgba(61,220,132,0.6);color:var(--ink);}
+  .cal-cell.has .cnt{color:var(--ok);}
+  .cal-cell.sel{background:var(--accent);border-color:var(--accent);color:#111;}
+  .cal-cell.sel .cnt{color:#111;}
+  .cal-detail{margin-top:12px;font-size:13px;line-height:1.7;}
+  .cal-detail .blk{background:var(--panel-soft);border-radius:10px;padding:10px 12px;margin-bottom:8px;}
+  .cal-detail .ttl{font-weight:800;margin-bottom:4px;}
+  .cal-detail .muted{color:var(--sub);}
+  .pick-sec{font-size:13px;color:var(--sub);margin:12px 0 6px;font-weight:700;}
+  .pick-sec:first-child{margin-top:0;}
+  .band-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+  .grade-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+  .cho-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;}
+  .pick-btn{
+    padding:11px 2px;border-radius:10px;border:1.5px solid var(--line);background:var(--panel-soft);
+    color:var(--ink);font-weight:800;font-size:13.5px;cursor:pointer;
+  }
+  .cho-grid .pick-btn{padding:9px 0;font-size:14px;}
+  .pick-btn.on{background:var(--accent);border-color:var(--accent);color:#111;}
+  .name-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+  .name-btn{
+    padding:10px 4px;border-radius:10px;border:2px solid var(--line);background:var(--panel-soft);
+    color:var(--ink);text-align:center;cursor:pointer;min-width:0;
+  }
+  .name-btn .nm{font-weight:800;font-size:14px;word-break:keep-all;}
+  .name-btn .bt{font-size:10.5px;color:var(--sub);margin-top:3px;line-height:1.3;}
+  .name-btn.pass{border-color:var(--ok);background:rgba(61,220,132,0.16);}
+  .name-btn.pass .bt{color:var(--ok);font-weight:700;}
+  .name-btn.invalid{border-color:var(--danger);}
+  .warn-text{font-size:12px;color:var(--danger);margin:6px 0;}
+  .err-bar{background:rgba(255,90,110,0.12);border:1px solid rgba(255,90,110,0.6);color:var(--danger);
+    border-radius:10px;padding:9px 12px;font-size:13px;font-weight:700;margin-bottom:10px;cursor:pointer;}
+  .mode-bar{display:flex;gap:8px;margin-bottom:12px;}
+  .mode-btn{flex:1;padding:11px 4px;border-radius:10px;border:1.5px solid var(--line);background:var(--panel-soft);
+    color:var(--sub);font-weight:800;font-size:13.5px;cursor:pointer;}
+  .mode-btn.on{background:var(--accent);border-color:var(--accent);color:#111;}
+  .pick-btn .pn{font-size:11px;font-weight:600;}
+  .name-btn.assigned{border-color:var(--accent);background:rgba(255,212,0,0.16);}
+  .name-btn.assigned .bt{color:var(--accent);font-weight:700;}
+  .name-btn.other{opacity:0.5;}
+  select.grade-sel{padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--panel-soft);color:var(--ink);font-size:12.5px;}
+  .toast{
+    position:fixed;left:50%;bottom:100px;transform:translateX(-50%);
+    background:#222;color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;
+    opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:20;white-space:nowrap;max-width:90%;
+    text-align:center;
+  }
+  .toast.show{opacity:1;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🥋 승급심사 프로그램 <span style="font-size:11px;color:var(--sub);font-weight:600;">v3 · 시간반 담기</span></h1>
+  <div class="sub">명단은 엑셀 업로드나 백업 불러오기로 넣어주세요. 이름·띠는 언제든 직접 고치거나 추가/삭제할 수 있고, 합격한 친구만 체크하면 됩니다. 체크 안 한 친구는 자동으로 "미응심"으로 기록되고 띠는 그대로 유지됩니다.</div>
+
+  <div class="card">
+    <div class="row-inline">
+      <div class="field" style="flex:1;min-width:140px;">
+        <label>이번 승급심사 월</label>
+        <input type="month" id="examMonth" onchange="updateCompleteBtn()">
+      </div>
+      <label class="file-btn" style="flex:1;min-width:160px;">
+        📁 명단 엑셀 업로드
+        <input type="file" id="fileInput" accept=".xlsx,.xls" onchange="handleUpload(event)">
+      </label>
+    </div>
+    <div class="row-inline" style="margin-top:10px;">
+      <button class="btn ghost small" onclick="downloadSampleTemplate()">📄 업로드 서식 예시 다운로드</button>
+    </div>
+    <div class="row-inline" style="margin-top:10px;">
+      <button class="btn ghost small" onclick="exportBackup()">💾 백업 내보내기 (JSON)</button>
+      <label class="btn ghost small" style="display:inline-block;">
+        📂 백업 불러오기
+        <input type="file" id="backupInput" accept=".json,application/json" onchange="importBackup(event)">
+      </label>
+    </div>
+    <div class="sub" style="margin:8px 0 0;font-size:11.5px;">
+      서식: A열 = 이름, B열 = 띠, C열 = 학년(선택: 유치부·1학년~6학년·중학생) (예: "노랑띠", 또는 품 단계는 "1품 5급"처럼 입력 · 품/급 생략 시 해당 품의 가장 낮은 급으로 인식) · 업로드하면 기존 명단은 지워지지 않고, 같은 이름은 띠만 갱신되고 새 이름은 추가됩니다.
+    </div>
+  </div>
+
+  <div class="card" id="pickCard" style="display:none;"></div>
+
+  <div class="card">
+    <h2 style="font-size:13px;color:var(--sub);margin-bottom:8px;">➕ 원생 추가</h2>
+    <div class="row-inline">
+      <div class="field" style="flex:1;min-width:100px;">
+        <input type="text" id="newName" placeholder="이름">
+      </div>
+      <div class="field" style="flex:1;min-width:100px;">
+        <input type="text" id="newBelt" placeholder="띠 (예: 노랑띠 / 1품 5급)">
+      </div>
+      <div class="field" style="min-width:90px;">
+        <select id="newGrade" class="grade-sel" style="width:100%;padding:9px 8px;">
+          <option value="">학년</option>
+          <option>유치부</option><option>1학년</option><option>2학년</option><option>3학년</option>
+          <option>4학년</option><option>5학년</option><option>6학년</option><option>중학생</option>
+        </select>
+      </div>
+      <button class="btn small" onclick="addPerson()">추가</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:13px;color:var(--sub);margin-bottom:8px;">📅 심사 기록 달력</h2>
+    <div class="cal-head">
+      <button class="btn ghost small" onclick="calMove(-1)">◀</button>
+      <b><span id="calYear"></span>년</b>
+      <button class="btn ghost small" onclick="calMove(1)">▶</button>
+    </div>
+    <div class="cal-grid" id="calGrid"></div>
+    <div class="cal-detail" id="calDetail"></div>
+  </div>
+
+  <div id="summaryBar" class="summary" style="display:none;">
+    <span>전체 <b id="totalCnt">0</b>명 · 합격 <b id="passCnt">0</b>명 · 미응심 <b id="failCnt">0</b>명</span>
+  </div>
+  <div id="invalidBar" class="err-bar" style="display:none;" onclick="setListOpen(true)"></div>
+  <div id="toolbar" class="toolbar" style="display:none;">
+    <button class="btn small ghost" id="listToggleBtn" onclick="setListOpen(!listOpen)">📋 전체 명단 보기 ▼</button>
+    <button class="btn small ok" onclick="setAll(true)">전체 합격</button>
+    <button class="btn small ghost" onclick="setAll(false)">전체 미응심</button>
+    <button class="btn small ghost" id="undoBtn" onclick="undoLast()" style="display:none;">↩ 마지막 완료 처리 취소</button>
+    <button class="btn small ghost" onclick="resetAll()">명단 초기화</button>
+  </div>
+
+  <div id="list"></div>
+</div>
+
+<div class="bottom-bar" id="bottomBar" style="display:none;">
+  <button class="btn ok" id="completeBtn" onclick="completeExam()">✅ 심사 완료 처리</button>
+  <button class="btn" onclick="exportResult()">📊 엑셀 내보내기</button>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* 흰띠 ~ 빨검띠: 색띠 12단계, 순서대로 승급 */
+const BELTS_COLOR = ["흰띠","흰노띠","노랑띠","노초띠","초록띠","초파띠","파랑띠","보라띠","밤띠","밤빨띠","빨강띠","빨검띠"];
+
+/* ===================== 초기 명단 (지금까지 확인된 현재 품/띠 현황) ===================== */
+const RAW_POOM = ``.trim(); // 명단은 코드에 넣지 않아요 (엑셀 업로드 / 백업 불러오기로 입력)
+
+const RAW_BELT = ``.trim();
+
+function buildSeedRoster(){
+  const list = [];
+  RAW_POOM.split('\n').forEach(line => {
+    const parts = line.trim().split(/\s+/);
+    if(!parts[0]) return;
+    const name = parts[0];
+    const beltStr = parts.slice(1).join(' '); // "1품 12급" 또는 급수 없이 "1품"
+    list.push({ name, current: parseBeltString(beltStr), pass:false });
+  });
+  RAW_BELT.split('\n').forEach(line => {
+    const parts = line.trim().split(/\s+/);
+    if(!parts[0]) return;
+    const name = parts[0];
+    const beltStr = parts.slice(1).join(' '); // 띠가 비어있으면 빈 문자열 -> 수정 필요 상태로 표시됨
+    list.push({ name, current: parseBeltString(beltStr), pass:false });
+  });
+  return list;
+}
+/* ===================== 저장 (브라우저에 자동 저장) ===================== */
+const STORE_KEY = 'promotion_exam_v1';
+function loadState(){
+  try{
+    const s = JSON.parse(localStorage.getItem(STORE_KEY));
+    if(s && Array.isArray(s.roster)) return s;
+  }catch(e){}
+  return null;
+}
+function saveState(){
+  try{ localStorage.setItem(STORE_KEY, JSON.stringify({ roster, history })); }catch(e){}
+}
+const savedState = loadState();
+let roster = savedState ? savedState.roster : buildSeedRoster(); // [{name, current:{type,...}, pass:false}]
+let history = savedState ? (savedState.history || []) : [];      // [{month, doneAt, changes:[{name,before,after}], absent:[{name,belt}]}]
+
+/* ===================== 띠/품 문자열 파싱 & 계산 ===================== */
+function parseBeltString(raw){
+  const s = String(raw || '').trim().replace(/\s+/g, ' ');
+  if(!s) return { type:'invalid', raw:s };
+  const colorIdx = BELTS_COLOR.indexOf(s);
+  if(colorIdx !== -1) return { type:'color', idx: colorIdx, value: s };
+  // "1품 12급" / "1품12급" / "1품 12" / "1품" 등 허용
+  const m = s.match(/^(\d+)\s*품\s*(\d+)?\s*급?$/);
+  if(m){
+    const poom = parseInt(m[1], 10);
+    let geup = m[2] ? parseInt(m[2], 10) : (poom * 12); // 급수 생략 시 해당 품의 가장 낮은 급으로 간주
+    if(poom < 1 || geup < 1) return { type:'invalid', raw:s };
+    return { type:'poom', poom, geup };
+  }
+  return { type:'invalid', raw:s };
+}
+function formatBelt(b){
+  if(b.type === 'color') return b.value;
+  if(b.type === 'poom') return `${b.poom}품 ${b.geup}급`;
+  return b.raw || '';
+}
+function nextBelt(b){
+  if(b.type === 'color'){
+    if(b.idx < BELTS_COLOR.length - 1){
+      return { type:'color', idx: b.idx + 1, value: BELTS_COLOR[b.idx + 1] };
+    }
+    // 마지막 색띠(빨검띠) 다음은 1품 12급부터 시작
+    return { type:'poom', poom: 1, geup: 12 };
+  }
+  if(b.type === 'poom'){
+    if(b.geup > 1) return { type:'poom', poom: b.poom, geup: b.geup - 1 };
+    // 해당 품의 1급을 통과하면 다음 품으로. 다음 품의 시작 급수는 12 × 품 번호 (1품:12, 2품:24, 3품:36 …)
+    const nextPoom = b.poom + 1;
+    return { type:'poom', poom: nextPoom, geup: 12 * nextPoom };
+  }
+  return b; // invalid는 그대로 반환 (승급 계산 불가)
+}
+
+/* ===================== 시간반 대상 배정 → 평가 ===================== */
+const TIMEBANDS = ['1시반','2시반','3시반','4시반','5시반','6시반'];
+const GRADES = ['유치부','1학년','2학년','3학년','4학년','5학년','6학년','중학생'];
+const BASE14 = ['ㄱ','ㄴ','ㄷ','ㄹ','ㅁ','ㅂ','ㅅ','ㅇ','ㅈ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ'];
+const GROUP_MAP = [0,0,1,2,2,3,4,5,5,6,6,7,8,8,9,10,11,12,13];
+function chosungBase(name){
+  if(!name) return null;
+  const code = name.charCodeAt(0) - 0xAC00;
+  if(code < 0 || code > 11171) return null;
+  return BASE14[GROUP_MAP[Math.floor(code / 588)]];
+}
+let pickMode = 'assign'; // 'assign' = 시간반 대상 담기, 'eval' = 그 시간반 평가(합격 체크)
+let pickBand = '', pickGrade = '', pickCho = '', bandWarn = false, listOpen = false;
+
+function setListOpen(v){ listOpen = v; render(); if(v){ const l = document.getElementById('list'); if(l && l.scrollIntoView) l.scrollIntoView({behavior:'smooth', block:'start'}); } }
+function setPickMode(m){ pickMode = m; bandWarn = false; renderPicker(); }
+function pickBandSet(b){ pickBand = (pickBand === b ? '' : b); bandWarn = false; renderPicker(); }
+function pickGradeSet(g){ pickGrade = (pickGrade === g ? '' : g); renderPicker(); }
+function pickChoSet(c){ pickCho = (pickCho === c ? '' : c); renderPicker(); }
+function scrollToPick(){ const c = document.getElementById('pickCard'); if(c && c.scrollIntoView) c.scrollIntoView({behavior:'smooth', block:'start'}); }
+
+/* 배정: 이름을 누르면 선택한 시간반 명단에 담기/빼기 */
+function assignTap(idx){
+  const r = roster[idx];
+  if(!r) return;
+  if(!pickBand){ bandWarn = true; showToast('시간반을 먼저 선택해주세요.'); renderPicker(); return; }
+  if(r.examBand === pickBand){
+    r.examBand = '';
+  } else {
+    if(r.examBand) showToast(`${r.name}: ${r.examBand} → ${pickBand}로 옮겼어요.`);
+    r.examBand = pickBand;
+  }
+  if(r.pass) r.passBand = r.examBand || '';
+  render();
+}
+function clearBandAssign(){
+  if(!pickBand){ showToast('시간반을 먼저 선택해주세요.'); return; }
+  const n = roster.filter(r => r.examBand === pickBand).length;
+  if(!n){ showToast('이 시간반에 담긴 원생이 없어요.'); return; }
+  if(!confirm(`${pickBand}에 담긴 ${n}명을 모두 뺄까요?`)) return;
+  roster.forEach(r => { if(r.examBand === pickBand){ r.examBand = ''; if(r.pass) r.passBand = ''; } });
+  render();
+}
+function pickConfirm(){
+  if(!pickBand){ bandWarn = true; showToast('시간반을 먼저 선택해주세요.'); renderPicker(); return; }
+  const n = roster.filter(r => r.examBand === pickBand).length;
+  if(!n){ showToast('담긴 원생이 없어요. 이름을 눌러 담아주세요.'); return; }
+  pickMode = 'eval';
+  renderPicker();
+  scrollToPick();
+}
+
+/* 평가: 이름을 누르면 합격 체크/해제 */
+function pickTap(idx){
+  const r = roster[idx];
+  if(!r) return;
+  if(r.current.type === 'invalid'){ showToast('띠 형식을 먼저 고쳐주세요.'); setListOpen(true); return; }
+  if(!r.pass){
+    r.pass = true; r.passBand = r.examBand || pickBand || '';
+  } else {
+    r.pass = false; r.passBand = '';
+  }
+  render();
+}
+
+function renderPicker(){
+  const card = document.getElementById('pickCard');
+  card.style.display = roster.length ? '' : 'none';
+  if(!roster.length) return;
+
+  const gradeOrder = g => { const i = GRADES.indexOf(g); return i < 0 ? 99 : i; };
+  const bandCount = b => roster.filter(r => r.examBand === b).length;
+  const inGrade = (r, g) => g === '미분류' ? !r.grade : r.grade === g;
+  const isAssign = pickMode === 'assign';
+
+  const bandBtns = TIMEBANDS.map(b => {
+    const n = bandCount(b);
+    return `<button class="pick-btn ${pickBand === b ? 'on' : ''}" onclick="pickBandSet('${b}')">${b}${n ? `<br><span class="pn">${n}명</span>` : ''}</button>`;
+  }).join('');
+
+  let html = `<div class="mode-bar">
+    <button class="mode-btn ${isAssign ? 'on' : ''}" onclick="setPickMode('assign')">① 시간반 대상 담기</button>
+    <button class="mode-btn ${!isAssign ? 'on' : ''}" onclick="setPickMode('eval')">② 평가하기</button>
+  </div>
+  <div class="pick-sec">시간반 선택</div>
+  <div class="band-grid">${bandBtns}</div>`;
+  if(bandWarn) html += `<div class="warn-text">⚠ 시간반을 먼저 선택해주세요.</div>`;
+
+  if(isAssign){
+    const hasNoGrade = roster.some(r => !r.grade);
+    const grades = hasNoGrade ? [...GRADES, '미분류'] : GRADES;
+    html += `<div class="sub" style="margin:8px 0 0;font-size:11.5px;">학년·초성으로 찾아서 이름을 누르면 선택한 시간반 명단에 담겨요. 다른 학년도 이어서 담고, 끝나면 아래 확인을 눌러요.</div>
+    <div class="pick-sec">학년으로 찾기</div>
+    <div class="grade-grid">${grades.map(g => {
+      const n = roster.filter(r => inGrade(r, g)).length;
+      return `<button class="pick-btn ${pickGrade === g ? 'on' : ''}" onclick="pickGradeSet('${g}')">${g}${n ? `<br><span class="pn">${n}명</span>` : ''}</button>`;
+    }).join('')}</div>
+    <div class="pick-sec">초성으로 찾기 (선택)</div>
+    <div class="cho-grid">${BASE14.map(c => `<button class="pick-btn ${pickCho === c ? 'on' : ''}" onclick="pickChoSet('${c}')">${c}</button>`).join('')}</div>`;
+
+    const hereN = bandCount(pickBand);
+    if(!pickGrade){
+      html += `<div class="pick-sec">이름을 눌러 ${pickBand || '시간반'} 명단에 담기</div><div class="sub" style="margin:0;">먼저 학년을 선택해주세요.</div>`;
+    } else {
+      const items = roster.map((r, idx) => ({ r, idx }))
+        .filter(({ r }) => inGrade(r, pickGrade) && (!pickCho || chosungBase(r.name) === pickCho))
+        .sort((a, b) => a.r.name.localeCompare(b.r.name, 'ko'));
+      html += `<div class="pick-sec">이름을 눌러 ${pickBand || '시간반'} 명단에 담기 (${items.length}명)</div>`;
+      if(!items.length){
+        html += `<div class="sub" style="margin:0;">해당 조건의 원생이 없어요.</div>`;
+      } else {
+        html += `<div class="name-grid">${items.map(({ r, idx }) => {
+          const here = pickBand && r.examBand === pickBand;
+          const other = r.examBand && r.examBand !== pickBand;
+          const cls = here ? 'assigned' : (other ? 'other' : '');
+          const sub = here ? `✔ ${r.examBand}` : (other ? `${r.examBand} 담김` : formatBelt(r.current) || '띠 없음');
+          return `<div class="name-btn ${cls}" onclick="assignTap(${idx})"><div class="nm">${escapeHtml(r.name)}</div><div class="bt">${escapeHtml(sub)}</div></div>`;
+        }).join('')}</div>`;
+      }
+    }
+    html += `<button class="btn ok" style="width:100%;margin-top:14px;" onclick="pickConfirm()">✅ ${pickBand || '시간반'} 확인 (${hereN}명) → 평가하기</button>
+    <button class="btn ghost small" style="width:100%;margin-top:8px;" onclick="clearBandAssign()">${pickBand || '이'} 시간반 담은 명단 모두 빼기</button>`;
+  } else {
+    if(!pickBand){
+      html += `<div class="sub" style="margin:10px 0 0;">평가할 시간반을 선택해주세요.</div>`;
+    } else {
+      const items = roster.map((r, idx) => ({ r, idx }))
+        .filter(({ r }) => r.examBand === pickBand)
+        .sort((a, b) => (gradeOrder(a.r.grade) - gradeOrder(b.r.grade)) || a.r.name.localeCompare(b.r.name, 'ko'));
+      const passN = items.filter(x => x.r.pass).length;
+      html += `<div class="pick-sec">${pickBand} 평가 대상 ${items.length}명 · 합격 ${passN}명 <span style="font-weight:600;">(이름을 누르면 합격 체크)</span></div>`;
+      if(!items.length){
+        html += `<div class="sub" style="margin:0;">이 시간반에 담긴 원생이 없어요. [① 시간반 대상 담기]에서 담아주세요.</div>`;
+      } else {
+        html += `<div class="name-grid">${items.map(({ r, idx }) => {
+          const invalid = r.current.type === 'invalid';
+          const cls = invalid ? 'invalid' : (r.pass ? 'pass' : '');
+          let beltTxt = invalid ? '⚠ 띠 확인' : formatBelt(r.current);
+          if(!invalid && r.pass) beltTxt = `${formatBelt(r.current)} → ${formatBelt(nextBelt(r.current))}`;
+          return `<div class="name-btn ${cls}" onclick="pickTap(${idx})"><div class="nm">${escapeHtml(r.name)}</div><div class="bt">${escapeHtml(r.grade || '')}<br>${escapeHtml(beltTxt)}</div></div>`;
+        }).join('')}</div>`;
+      }
+      html += `<button class="btn ghost small" style="width:100%;margin-top:12px;" onclick="setPickMode('assign')">이 시간반 대상 수정하기</button>`;
+    }
+  }
+  card.innerHTML = html;
+}
+
+/* ===================== 초기화 ===================== */
+(function initMonth(){
+  const now = new Date();
+  document.getElementById('examMonth').value = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+})();
+
+/* ===================== 엑셀 업로드 ===================== */
+function handleUpload(evt){
+  const file = evt.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try{
+      const wb = XLSX.read(e.target.result, { type:'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
+      let dataRows = rows;
+      if(rows.length && String(rows[0][0]||'').trim() === '이름'){
+        dataRows = rows.slice(1); // 헤더 행 제거
+      }
+      let addedCount = 0, updatedCount = 0;
+      dataRows.forEach(r => {
+        const name = String(r[0] || '').trim();
+        const beltRaw = String(r[1] || '').trim();
+        const gradeRaw = String(r[2] || '').trim();
+        const grade = GRADES.includes(gradeRaw) ? gradeRaw : '';
+        if(!name) return;
+        const existing = roster.find(p => p.name === name);
+        if(existing){
+          if(beltRaw) existing.current = parseBeltString(beltRaw);
+          if(grade) existing.grade = grade;
+          updatedCount++;
+        } else {
+          roster.push({ name, grade, current: parseBeltString(beltRaw), pass:false, passBand:'' });
+          addedCount++;
+        }
+      });
+      if(addedCount === 0 && updatedCount === 0){
+        alert('업로드한 파일에서 이름을 찾지 못했어요. A열에 이름, B열에 띠가 있는지 확인해주세요.');
+        return;
+      }
+      render();
+      showToast(`반영 완료 (기존 ${updatedCount}명 갱신, 신규 ${addedCount}명 추가)`);
+    }catch(err){
+      alert('엑셀 파일을 읽는 중 문제가 생겼어요. 파일 형식을 확인해주세요.');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  evt.target.value = '';
+}
+
+function downloadSampleTemplate(){
+  const data = [
+    { '이름':'홍길동', '띠':'노랑띠', '학년':'1학년' },
+    { '이름':'김철수', '띠':'빨검띠', '학년':'3학년' },
+    { '이름':'이영희', '띠':'1품 5급', '학년':'유치부' }
+  ];
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '명단');
+  XLSX.writeFile(wb, 'promotion_upload_template.xlsx');
+}
+
+/* ===================== 화면 렌더링 ===================== */
+function render(){
+  saveState();
+  updateCompleteBtn();
+  renderCalendar();
+  renderPicker();
+  document.getElementById('undoBtn').style.display = history.length ? '' : 'none';
+  const listEl = document.getElementById('list');
+  const summaryBar = document.getElementById('summaryBar');
+  const toolbar = document.getElementById('toolbar');
+  const bottomBar = document.getElementById('bottomBar');
+
+  if(roster.length === 0){
+    listEl.style.display = '';
+    document.getElementById('invalidBar').style.display = 'none';
+    listEl.innerHTML = `<div class="empty-state">명단이 비어있어요.<br>위에서 원생을 추가하거나 엑셀/백업 파일을 올려주세요.</div>`;
+    summaryBar.style.display = 'none';
+    toolbar.style.display = 'none';
+    bottomBar.style.display = 'none';
+    return;
+  }
+
+  listEl.innerHTML = roster.map((r, idx) => {
+    const invalid = r.current.type === 'invalid';
+    const nxt = invalid ? null : nextBelt(r.current);
+    const rowClass = invalid ? 'invalid' : (r.pass ? 'pass' : '');
+    return `
+      <div class="stu-row ${rowClass}">
+        <div class="stu-top">
+          <input class="name-edit" type="text" value="${escapeHtml(r.name)}" onchange="updateName(${idx}, this.value)">
+          <div class="pass-toggle ${r.pass ? 'on' : ''}" onclick="togglePass(${idx})">${r.pass ? '✔ 합격' : '미응심'}</div>
+          <button class="del-btn" onclick="deletePerson(${idx})" title="명단에서 삭제">×</button>
+        </div>
+        <div class="stu-belt-line">
+          <input class="belt-edit" type="text" value="${escapeHtml(formatBelt(r.current))}"
+                 onchange="updateBelt(${idx}, this.value)" placeholder="예: 노랑띠 / 1품 5급">
+          <span class="arrow">→</span>
+          <span class="next-belt ${r.pass ? 'active' : ''}">${invalid ? '?' : formatBelt(nxt)}</span>
+          <select class="grade-sel" onchange="updateGrade(${idx}, this.value)">
+            <option value="">학년?</option>
+            ${GRADES.map(g => `<option ${r.grade === g ? 'selected' : ''}>${g}</option>`).join('')}
+          </select>
+        </div>
+        ${invalid ? `<div class="err-msg">⚠ 띠 형식을 알아볼 수 없어요. 직접 고쳐주세요. (예: 노랑띠 / 1품 5급)</div>` : ''}
+      </div>
+    `;
+  }).join('');
+
+  listEl.style.display = listOpen ? '' : 'none';
+  document.getElementById('listToggleBtn').textContent = listOpen ? '📋 전체 명단 접기 ▲' : '📋 전체 명단 보기 ▼';
+  const invalidN = roster.filter(r => r.current.type === 'invalid').length;
+  const invBar = document.getElementById('invalidBar');
+  invBar.style.display = (invalidN > 0 && !listOpen) ? '' : 'none';
+  invBar.textContent = `⚠ 띠를 확인해야 하는 원생 ${invalidN}명 — 눌러서 수정하기`;
+  const total = roster.length;
+  const passCnt = roster.filter(r => r.pass).length;
+  document.getElementById('totalCnt').textContent = total;
+  document.getElementById('passCnt').textContent = passCnt;
+  document.getElementById('failCnt').textContent = total - passCnt;
+  summaryBar.style.display = 'flex';
+  toolbar.style.display = 'flex';
+  bottomBar.style.display = 'flex';
+}
+
+function togglePass(idx){
+  if(roster[idx].current.type === 'invalid'){
+    showToast('띠 형식을 먼저 고쳐주세요.');
+    return;
+  }
+  roster[idx].pass = !roster[idx].pass;
+  roster[idx].passBand = roster[idx].pass ? (roster[idx].examBand || pickBand) : '';
+  render();
+}
+function updateGrade(idx, value){
+  roster[idx].grade = value;
+  render();
+}
+function updateBelt(idx, value){
+  roster[idx].current = parseBeltString(value);
+  render();
+}
+function updateName(idx, value){
+  const name = value.trim();
+  if(!name){ showToast('이름은 비워둘 수 없어요.'); render(); return; }
+  roster[idx].name = name;
+  render();
+}
+function deletePerson(idx){
+  if(!confirm(`'${roster[idx].name}' 님을 명단에서 삭제할까요?`)) return;
+  roster.splice(idx, 1);
+  render();
+}
+function addPerson(){
+  const nameInput = document.getElementById('newName');
+  const beltInput = document.getElementById('newBelt');
+  const name = nameInput.value.trim();
+  if(!name){ showToast('이름을 입력해주세요.'); return; }
+  if(roster.some(r => r.name === name)){
+    showToast('이미 명단에 있는 이름이에요.');
+    return;
+  }
+  const gradeSel = document.getElementById('newGrade');
+  roster.push({ name, grade: gradeSel.value || '', current: parseBeltString(beltInput.value), pass:false, passBand:'' });
+  gradeSel.value = '';
+  nameInput.value = '';
+  beltInput.value = '';
+  render();
+  showToast(`'${name}' 님을 추가했어요.`);
+}
+function setAll(pass){
+  roster.forEach(r => { if(r.current.type !== 'invalid'){ r.pass = pass; r.passBand = pass ? (r.examBand || pickBand) : ''; } });
+  render();
+}
+
+/* ===================== 심사 기록 달력 ===================== */
+let calYear = new Date().getFullYear();
+let calSel = '';
+function calMove(d){ calYear += d; calSel = ''; renderCalendar(); }
+function calSelect(key){ calSel = key; renderCalendar(); }
+function pickMonth(key){
+  document.getElementById('examMonth').value = key;
+  updateCompleteBtn();
+  showToast(`심사 월을 ${monthLabel(key)}(${key.split('-')[0]})로 바꿨어요.`);
+}
+function renderCalendar(){
+  document.getElementById('calYear').textContent = calYear;
+  let cells = '';
+  for(let m = 1; m <= 12; m++){
+    const key = calYear + '-' + String(m).padStart(2, '0');
+    const recs = history.filter(h => h.month === key);
+    const passTotal = recs.reduce((n, h) => n + h.changes.length, 0);
+    const cls = 'cal-cell' + (recs.length ? ' has' : '') + (key === calSel ? ' sel' : '');
+    cells += `<div class="${cls}" onclick="calSelect('${key}')">${m}월<div class="cnt">${recs.length ? passTotal + '명 승급' : '-'}</div></div>`;
+  }
+  document.getElementById('calGrid').innerHTML = cells;
+
+  const det = document.getElementById('calDetail');
+  if(!calSel){ det.innerHTML = '<div class="muted">달을 누르면 그 달 심사 기록을 볼 수 있어요.</div>'; return; }
+  const recs = history.filter(h => h.month === calSel);
+  const title = `${calSel.split('-')[0]}년 ${monthLabel(calSel)}`;
+  const pickBtn = `<button class="btn ghost small" onclick="pickMonth('${calSel}')">이 달을 심사 월로 선택</button>`;
+  if(!recs.length){
+    det.innerHTML = `<div class="blk"><div class="ttl">${title}</div><div class="muted">완료 처리한 기록이 없어요.</div></div>${pickBtn}`;
+    return;
+  }
+  det.innerHTML = recs.map(h => {
+    const pass = h.changes.map(c => `${escapeHtml(c.name)} <span class="muted">${escapeHtml(formatBelt(c.before))} → ${escapeHtml(formatBelt(c.after))}${c.band ? ' · ' + escapeHtml(c.band) : ''}</span>`).join('<br>');
+    const abs = h.absent.map(a => escapeHtml(a.name)).join(', ');
+    const when = new Date(h.doneAt).toLocaleDateString('ko-KR');
+    return `<div class="blk"><div class="ttl">${title} 심사 <span class="muted">(${when} 완료 처리)</span></div>
+      <div><b>합격 ${h.changes.length}명</b><br>${pass || '<span class="muted">없음</span>'}</div>
+      <div style="margin-top:6px;"><b>미응심 ${h.absent.length}명</b><br><span class="muted">${abs || '없음'}</span></div></div>`;
+  }).join('') + pickBtn;
+}
+
+/* ===================== 심사 완료 처리 ===================== */
+function getMonth(){ return document.getElementById('examMonth').value || ''; }
+function monthLabel(m){ return m ? (parseInt(m.split('-')[1], 10) + '월') : '이번'; }
+function updateCompleteBtn(){
+  const b = document.getElementById('completeBtn');
+  if(b) b.textContent = `✅ ${monthLabel(getMonth())} 심사 완료 처리`;
+}
+function completeExam(){
+  const month = getMonth();
+  if(!month){ showToast('심사 월을 먼저 선택해주세요.'); return; }
+  if(roster.some(r => r.current.type === 'invalid')){
+    alert('띠 형식을 알아볼 수 없는 친구가 있어요. 빨간 테두리 줄을 먼저 고쳐주세요.');
+    return;
+  }
+  const passers = roster.filter(r => r.pass);
+  if(!passers.length){ showToast('합격 체크한 친구가 없어요.'); return; }
+  const label = monthLabel(month);
+  const already = history.some(h => h.month === month);
+  let msg = `${label} 심사를 완료 처리할까요?\n\n합격 ${passers.length}명 → 승급으로 기록\n미응심 ${roster.length - passers.length}명 → 띠 그대로 유지`;
+  if(already) msg += `\n\n⚠ ${label}은 이미 완료 처리한 기록이 있어요. 계속하면 합격자가 한 번 더 승급돼요.`;
+  if(!confirm(msg)) return;
+
+  const changes = passers.map(r => ({ name: r.name, before: r.current, after: nextBelt(r.current), band: r.passBand || '' }));
+  const absent = roster.filter(r => !r.pass).map(r => ({ name: r.name, belt: r.current }));
+  const assigned = roster.filter(r => r.examBand).map(r => ({ name: r.name, band: r.examBand }));
+  history.push({ month, doneAt: Date.now(), changes, absent, assigned });
+  calYear = parseInt(month.split('-')[0], 10); calSel = month;
+  passers.forEach(r => { r.current = nextBelt(r.current); r.pass = false; r.passBand = ''; });
+  roster.forEach(r => { r.examBand = ''; });
+  render();
+  showToast(`${label} 심사 완료! ${passers.length}명 승급 처리했어요.`);
+}
+function undoLast(){
+  if(!history.length) return;
+  const last = history[history.length - 1];
+  if(!confirm(`${monthLabel(last.month)} 완료 처리(승급 ${last.changes.length}명)를 취소하고 이전 띠로 되돌릴까요?`)) return;
+  last.changes.forEach(c => {
+    const p = roster.find(r => r.name === c.name && formatBelt(r.current) === formatBelt(c.after));
+    if(p){ p.current = c.before; p.pass = true; p.passBand = c.band || ''; }
+  });
+  (last.assigned || []).forEach(a => { const p = roster.find(r => r.name === a.name); if(p) p.examBand = a.band; });
+  history.pop();
+  render();
+  showToast('완료 처리를 취소했어요. 합격 체크는 다시 켜져 있어요.');
+}
+function resetAll(){
+  if(!confirm('명단과 완료 처리 기록을 모두 지우고 빈 상태로 되돌릴까요?\n(먼저 백업 내보내기를 해두면 나중에 복원할 수 있어요)')) return;
+  roster = buildSeedRoster();
+  history = [];
+  render();
+  showToast('빈 상태로 초기화했어요.');
+}
+
+/* ===================== 백업 (JSON) ===================== */
+function exportBackup(){
+  const data = { app:'promotion-exam', version:1, exportedAt:new Date().toISOString(), roster, history };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const d = new Date();
+  const ymd = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  a.href = url;
+  a.download = `promotion_backup_${ymd}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast(`백업 저장! 원생 ${roster.length}명 · 심사 기록 ${history.length}건`);
+}
+function importBackup(evt){
+  const file = evt.target.files[0];
+  evt.target.value = '';
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try{
+      const data = JSON.parse(e.target.result);
+      const okRoster = Array.isArray(data.roster) && data.roster.every(r => r && typeof r.name === 'string' && r.current && typeof r.current.type === 'string');
+      if(!okRoster) throw new Error('bad roster');
+      const newHistory = Array.isArray(data.history) ? data.history : [];
+      if(!confirm(`백업 파일로 복원할까요?\n\n원생 ${data.roster.length}명 · 심사 기록 ${newHistory.length}건\n(지금 화면의 명단과 기록은 백업 내용으로 교체돼요)`)) return;
+      roster = data.roster.map(r => ({ name:r.name, grade:(GRADES.includes(r.grade) ? r.grade : ''), current:r.current, pass:false, passBand:'', examBand:(TIMEBANDS.includes(r.examBand) ? r.examBand : '') }));
+      history = newHistory;
+      calSel = '';
+      render();
+      showToast('백업을 불러왔어요.');
+    }catch(err){
+      alert('백업 파일을 읽을 수 없어요. 이 프로그램에서 내보낸 JSON 파일인지 확인해주세요.');
+    }
+  };
+  reader.readAsText(file);
+}
+
+/* ===================== 결과 내보내기 ===================== */
+/* 띠별 현황 표 데이터 만들기 (엑셀 시트 1): 띠 하나가 한 열, 이름은 아래로 세로 나열 */
+function buildBeltTable(){
+  const groups = BELTS_COLOR.map(b => ({ label: b, items: [] }));
+  const poomList = roster.filter(r => r.current.type === 'poom').map(r => r.current.poom);
+  const maxPoom = Math.max(1, ...poomList);
+  for(let p = 1; p <= maxPoom; p++) groups.push({ label: `${p}품`, items: [] });
+
+  roster.forEach(r => {
+    const c = r.current;
+    if(c.type === 'color'){
+      groups[c.idx].items.push({ text: r.name, geup: 0, name: r.name });
+    } else if(c.type === 'poom'){
+      groups[BELTS_COLOR.length + c.poom - 1].items.push({ text: `${c.geup}급 ${r.name}`, geup: c.geup, name: r.name });
+    }
+  });
+  groups.forEach(g => g.items.sort((a, b) => (b.geup - a.geup) || a.name.localeCompare(b.name, 'ko')));
+
+  const aoa = [
+    [...groups.map(g => g.label), '전체'],
+    [...groups.map(g => `${g.items.length}명`), `${roster.length}명`]
+  ];
+  const maxLen = Math.max(0, ...groups.map(g => g.items.length));
+  for(let i = 0; i < maxLen; i++){
+    aoa.push([...groups.map(g => g.items[i] ? g.items[i].text : ''), '']);
+  }
+  return { aoa, merges: [], boldRows: new Set([0, 1]) };
+}
+
+/* 시트 전체 가운데정렬 + 테두리 */
+function styleSheet(ws, opts){
+  opts = opts || {};
+  const center = { horizontal:'center', vertical:'center', wrapText:false };
+  const thin = { style:'thin', color:{ rgb:'AAAAAA' } };
+  const border = { top:thin, bottom:thin, left:thin, right:thin };
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for(let R = range.s.r; R <= range.e.r; R++){
+    for(let C = range.s.c; C <= range.e.c; C++){
+      const addr = XLSX.utils.encode_cell({ r:R, c:C });
+      if(!ws[addr]) ws[addr] = { t:'s', v:'' };
+      const isHeader = R === 0;
+      const bold = isHeader || (opts.boldRows && opts.boldRows.has(R)) || (opts.boldFirstCol && C === 0);
+      ws[addr].s = {
+        alignment: center,
+        border,
+        font: { bold: !!bold },
+        ...(isHeader ? { fill:{ fgColor:{ rgb:'FFE9A8' } } } : {})
+      };
+    }
+  }
+}
+
+function exportResult(){
+  const invalidCount = roster.filter(r => r.current.type === 'invalid').length;
+  if(invalidCount > 0){
+    alert(`띠 형식을 알아볼 수 없는 친구가 ${invalidCount}명 있어요. 빨간 테두리 줄을 먼저 고쳐주세요.`);
+    return;
+  }
+  const pending = roster.filter(r => r.pass).length;
+  if(pending > 0 && !confirm(`합격 체크만 하고 아직 '심사 완료 처리'를 안 한 친구가 ${pending}명 있어요.\n이 상태로 내보내면 승급이 반영되지 않은 현재 띠 기준으로 나와요. 그래도 내보낼까요?`)) return;
+
+  const month = getMonth();
+  const wb = XLSX.utils.book_new();
+
+  // 시트 1: 띠별 현황
+  const t = buildBeltTable();
+  const ws1 = XLSX.utils.aoa_to_sheet(t.aoa);
+  ws1['!cols'] = t.aoa[0].map(() => ({ wch:14 }));
+  styleSheet(ws1, { boldRows: t.boldRows });
+  XLSX.utils.book_append_sheet(wb, ws1, '띠별 현황');
+
+  // 시트 2: 해당 월 심사 결과 (완료 처리한 기록이 있을 때)
+  const rec = history.filter(h => h.month === month).pop();
+  if(rec){
+    const gradeOf = (n) => { const x = roster.find(r => r.name === n); return (x && x.grade) || ''; };
+    const rows = [['이름', '학년', '심사 전', '심사 후', '결과', '시간반']];
+    rec.changes.forEach(c => rows.push([c.name, gradeOf(c.name), formatBelt(c.before), formatBelt(c.after), '합격(승급)', c.band || '']));
+    rec.absent.forEach(a => rows.push([a.name, gradeOf(a.name), formatBelt(a.belt), formatBelt(a.belt), '미응심', '']));
+    const ws2 = XLSX.utils.aoa_to_sheet(rows);
+    ws2['!cols'] = [{ wch:14 }, { wch:10 }, { wch:12 }, { wch:12 }, { wch:12 }, { wch:10 }];
+    styleSheet(ws2);
+    XLSX.utils.book_append_sheet(wb, ws2, `${monthLabel(month)} 심사결과`.slice(0, 31));
+  }
+
+  XLSX.writeFile(wb, `promotion_status_${month || 'result'}.xlsx`);
+}
+
+/* ===================== 유틸 ===================== */
+function escapeHtml(s){
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+render();
+</script>
+</body>
+</html>
