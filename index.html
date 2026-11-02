@@ -1137,6 +1137,8 @@ function completeExam(){
   const already = history.some(h => h.month === month);
   let msg = `${label} 심사를 완료 처리할까요?\n\n합격 ${passers.length}명 → 승급으로 기록\n미응심 ${roster.length - passers.length}명 → 띠 그대로 유지`;
   if(already) msg += `\n\n⚠ ${label}은 이미 완료 처리한 기록이 있어요. 계속하면 합격자가 한 번 더 승급돼요.`;
+  const latest = history.reduce(function(m, h){ return h.month > m ? h.month : m; }, '');
+  if(!already && latest && month < latest) msg += `\n\n⚠ 더 최근인 ${monthLabel(latest)} 심사 기록이 이미 있어요. 심사 월(${label})이 맞는지 꼭 확인해주세요.`;
   if(!confirm(msg)) return;
 
   const changes = passers.map(r => ({ name: r.name, before: r.current, after: nextBelt(r.current), band: r.passBand || '' }));
@@ -1148,6 +1150,8 @@ function completeExam(){
   roster.forEach(r => { r.examBand = ''; });
   render();
   showToast(`${label} 심사 완료! ${passers.length}명 승급 처리했어요.`);
+  // 통합관리(띠 체크·띠 지급)에도 바로 반영
+  try{ if(window.parent !== window && window.parent.examAutoPush) setTimeout(function(){ window.parent.examAutoPush(); }, 500); }catch(e){}
 }
 function undoLast(){
   if(!history.length) return;
@@ -2433,6 +2437,11 @@ function examPushToHost(){
   }
   if(accepted) examSyncFromHost();
 }
+/* 심사 화면에서 "심사 완료 처리"를 누르면 자동으로 통합관리에 반영 */
+function examAutoPush(){
+  try{ examPushToHost(); }catch(e){ console.error(e); }
+}
+window.examAutoPush = examAutoPush;
 function examInit(){
   const f = document.getElementById('exam-frame');
   if(!f) return;
