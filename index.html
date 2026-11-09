@@ -382,6 +382,22 @@
     </label>
   </div>
 
+  <div class="card" id="bs-card" style="margin:10px 0;padding:12px 14px;">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <b>🥋 출결 앱 띠 보내기</b>
+      <span id="bs-status" style="font-size:12.5px;color:var(--sub);flex:1;min-width:160px;"></span>
+      <button class="btn ghost small" onclick="bsToggle()">설정</button>
+      <button class="btn small" onclick="bsPush(true)">지금 보내기</button>
+    </div>
+    <div id="bs-set" style="display:none;margin-top:8px;">
+      <div class="sub" style="font-size:12.5px;margin-bottom:6px;">통합관리에서 띠가 바뀌면 출결 앱(관장님 폰)에도 저절로 바뀌어요. 아래 비밀번호와 똑같은 비밀번호를 출결 앱 [명단·형제] 탭 맨 위 '통합관리 띠 연동'에 넣어 주세요. 띠 명단은 이 비밀번호로 잠가서 보내요(8자 이상 권장).</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <input type="password" id="bs-pass" placeholder="연동 비밀번호" style="flex:1;min-width:160px;">
+        <button class="btn small" onclick="bsSavePass()">저장하고 보내기</button>
+      </div>
+    </div>
+  </div>
+
   <div class="tabbar">
     <button class="tab-btn active" data-tab="exam" onclick="switchTab('exam')">승급심사</button>
     <button class="tab-btn" data-tab="promo" onclick="switchTab('promo')">승급 관리</button>
@@ -4158,6 +4174,83 @@ function stDownloadDemo(){
   bcRender();
   stRender();
   examInit();
+})();
+
+/* ===================================================================
+   출결 앱 띠 보내기
+   통합관리 명단(이름 → 띠)을 비밀번호로 잠가(AES-GCM) 공용 칸에 올리면,
+   출결 앱(관장님 폰)이 받아서 풀고 원생 띠를 맞춰요. 비밀번호는 코드에 없어요.
+=================================================================== */
+const BS_URL = 'https://taekwondo-wordgame-default-rtdb.asia-southeast1.firebasedatabase.app/apps/pub_beltsync/data/blob.json';
+const BS_PASS_KEY = 'tkd_beltsync_pass_v1';
+let bsBusy = false;
+function bsB64(u8){ let s=''; for(let i=0;i<u8.length;i++) s+=String.fromCharCode(u8[i]); return btoa(s); }
+function bsHash(str){ let h=5381; for(let i=0;i<str.length;i++){ h=((h<<5)+h+str.charCodeAt(i))|0; } return String(h>>>0); }
+async function bsEncrypt(pw, text){
+  const enc = new TextEncoder(), n = 150000;
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+  const base = await crypto.subtle.importKey('raw', enc.encode(pw), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey({name:'PBKDF2', salt, iterations:n, hash:'SHA-256'}, base, {name:'AES-GCM', length:256}, false, ['encrypt']);
+  const ct = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, enc.encode(text)));
+  return { v:1, n, s:bsB64(salt), i:bsB64(iv), d:bsB64(ct) };
+}
+function bsBeltMap(){
+  const b = {};
+  (peRoster || []).forEach(r => {
+    if(!r || !r.name || !r.current || r.current.type === 'invalid') return;
+    const t = peFormatBelt(r.current);
+    if(t) b[String(r.name).trim()] = t;
+  });
+  return b;
+}
+function bsSetStatus(t){ const el = document.getElementById('bs-status'); if(el) el.textContent = t; }
+function bsPass(){ try{ return localStorage.getItem(BS_PASS_KEY) || ''; }catch(e){ return ''; } }
+async function bsPush(manual){
+  if(bsBusy) return;
+  const pw = bsPass();
+  if(!pw){ bsSetStatus('비밀번호를 넣으면 출결 앱으로 띠가 자동으로 가요'); if(manual){ bsToggle(true); showToast('연동 비밀번호를 먼저 넣어 주세요'); } return; }
+  const b = bsBeltMap(), n = Object.keys(b).length;
+  if(!n){ if(manual) showToast('보낼 띠 명단이 없어요'); return; }
+  const sig = bsHash(pw + '|' + JSON.stringify(b));
+  let last = ''; try{ last = localStorage.getItem('jdbelt_sig') || ''; }catch(e){}
+  if(!manual && last === sig) return;
+  bsBusy = true; bsSetStatus('보내는 중…');
+  try{
+    const t = Date.now();
+    const payload = await bsEncrypt(pw, JSON.stringify({ t, b }));
+    payload.t = t;
+    const r = await fetch(BS_URL, { method:'PUT', body: JSON.stringify(payload) });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    try{ localStorage.setItem('jdbelt_sig', sig); localStorage.setItem('jdbelt_at', String(t)); }catch(e){}
+    bsSetStatus(`✔ ${new Date(t).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'})} ${n}명 보냄 (출결 앱은 10분 안에 맞춰져요)`);
+    if(manual) showToast(`출결 앱으로 ${n}명 띠를 보냈어요`);
+  }catch(e){
+    bsSetStatus('⚠ 보내지 못했어요 (' + (e.message || '인터넷 확인') + ') — 잠시 뒤 다시 시도해요');
+    if(manual) showToast('띠를 보내지 못했어요. 인터넷을 확인해 주세요');
+  }finally{ bsBusy = false; }
+}
+function bsToggle(force){
+  const el = document.getElementById('bs-set'); if(!el) return;
+  const show = force === true ? true : el.style.display === 'none';
+  el.style.display = show ? 'block' : 'none';
+  const inp = document.getElementById('bs-pass'); if(inp && show) inp.value = bsPass();
+}
+function bsSavePass(){
+  const v = (document.getElementById('bs-pass').value || '').trim();
+  if(v.length < 4){ showToast('비밀번호를 4자 이상 넣어 주세요'); return; }
+  try{ localStorage.setItem(BS_PASS_KEY, v); localStorage.removeItem('jdbelt_sig'); }catch(e){}
+  bsToggle(false); bsPush(true);
+}
+/* 띠가 저장될 때마다(잠깐 모아서) 보내고, 1분마다 바뀐 게 있는지도 확인 */
+(function(){
+  const orig = peSave; let t = null;
+  peSave = function(){ orig.apply(this, arguments); clearTimeout(t); t = setTimeout(() => bsPush(false), 3000); };
+  try{
+    const at = parseInt(localStorage.getItem('jdbelt_at'), 10);
+    bsSetStatus(bsPass() ? (at ? `마지막으로 보낸 때: ${new Date(at).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'})}` : '') : '비밀번호를 넣으면 출결 앱으로 띠가 자동으로 가요');
+  }catch(e){}
+  setTimeout(() => bsPush(false), 4000);
+  setInterval(() => bsPush(false), 60000);
 })();
 </script>
 </body>
