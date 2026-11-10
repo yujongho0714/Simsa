@@ -389,6 +389,21 @@
       <button class="btn ghost small" onclick="bsToggle()">설정</button>
       <button class="btn small" onclick="bsPush(true)">지금 보내기</button>
     </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;border-top:1px dashed var(--line,#ddd);padding-top:8px">
+      <b>🔗 출결 앱 원생 명단 연동</b>
+      <span id="at-status" style="font-size:12.5px;color:var(--sub);flex:1;min-width:160px;"></span>
+      <button class="btn ghost small" onclick="atToggle()">연결하기</button>
+      <button class="btn small" onclick="atSchedule()">지금 맞추기</button>
+    </div>
+    <div id="at-set" style="display:none;margin-top:8px;">
+      <div class="sub" style="font-size:12.5px;margin-bottom:6px;">이름·학년·띠, 새로 추가한 원생까지 출결 앱(키오스크·문자 폰·PC)과 통합관리가 같은 명단을 써요. 연결 코드는 출결 앱 설정 맨 아래 '💻 PC에서 관리하기'에 있어요. 계정은 출결 앱 로그인과 같은 이메일·비밀번호예요. (이 기기에서 한 번만)</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <input type="text" id="at-code" placeholder="연결 코드 JD1-… (처음 한 번)" style="flex:2;min-width:180px;">
+        <input type="text" id="at-email" placeholder="출결 앱 이메일" style="flex:1;min-width:150px;">
+        <input type="password" id="at-pw" placeholder="비밀번호" style="flex:1;min-width:120px;">
+        <button class="btn small" onclick="atLogin()">연결</button>
+      </div>
+    </div>
     <div id="bs-set" style="display:none;margin-top:8px;">
       <div class="sub" style="font-size:12.5px;margin-bottom:6px;">통합관리·출결 앱·PC 어디서 띠를 고쳐도 서로 맞춰져요 (1~2분, 나중에 고친 쪽이 이김). 아래 비밀번호와 똑같은 비밀번호를 출결 앱 [명단·형제] 탭 맨 위 '통합관리 띠 연동'에 넣어 주세요. 띠 명단은 이 비밀번호로 잠가서 보내요(8자 이상 권장).</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
@@ -4314,6 +4329,206 @@ function bsSavePass(){
   setTimeout(() => bsPullBack().then(() => bsPush(false)), 3000);
   setInterval(() => bsPullBack().then(() => bsPush(false)), 60000);
 })();
+
+/* ===================================================================
+   출결 앱 직접 연결 (원생 명단 전체 연동)
+   - 통합관리가 출결 앱 데이터(Firestore)에 도장 계정으로 직접 로그인
+   - 이름·학년·띠: 양쪽 어디서 고쳐도 맞춤 (둘 다 고쳤으면 띠는 나중 것, 이름·학년은 출결 것)
+   - 출결에서 새로 넣은 원생 → 통합관리 명단에 추가 / 통합관리에서 추가한 원생 → 출결에 추가
+   - 출결에서 퇴관한 원생 → 통합관리 명단에서 빠짐 / 통합관리에서 삭제 → 출결 퇴관(물어봄)
+   연결 코드·계정 비밀번호는 코드 안에 없어요. (연결 코드: 출결 앱 설정의 💻 PC에서 관리하기)
+=================================================================== */
+const AT = { db: null, fs: null, user: null, students: [], timer: null, busy: false, ready: false };
+const AT_CFG_KEY = 'tkd_attend_cfg_v1', AT_LINKED_KEY = 'tkd_attend_linked_v1', AT_SKIP_KEY = 'tkd_attend_skip_v1', AT_REMOVED_KEY = 'tkd_attend_removed_v1';
+const AT_SDK = 'https://www.gstatic.com/firebasejs/10.12.2/';
+const atGet = (k, d) => { try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch(e){ return d; } };
+const atSet = (k, v) => { try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} };
+function atStatus(t){ const el = document.getElementById('at-status'); if(el) el.textContent = t; }
+function atParseCode(code){
+  code = String(code || '').trim(); if(!code.startsWith('JD1-')) return null;
+  try{ const [projectId, apiKey, storageBucket] = atob(code.slice(4).replace(/-/g, '+').replace(/_/g, '/')).split('|');
+    return projectId && apiKey ? { projectId, apiKey, storageBucket, authDomain: projectId + '.firebaseapp.com' } : null; }catch(e){ return null; }
+}
+/* 학년: 출결(나이 → 학년) ↔ 통합관리(유치부 · 1~6학년 · 중학생) */
+const atThisYear = () => new Date().getFullYear();
+function atLabelOf(age){ if(age <= 0) return ''; if(age <= 7) return '유치부'; if(age < 14) return `${age-7}학년`; if(age < 17) return `중${age-13}`; if(age < 20) return `고${age-16}`; return '성인'; }
+function atAgeOf(t){ const m = String(t || '').trim().match(/^([1-6])학년$/); return m ? 7 + +m[1] : 0; }
+const atCurAge = s => (s.age > 0 && s.ageYear > 0) ? s.age + (atThisYear() - s.ageYear) : 0;
+const atLabel = s => atCurAge(s) > 0 ? atLabelOf(atCurAge(s)) : (s.grade || '');
+function atToPe(s){ const l = atLabel(s); if(['유치부','1학년','2학년','3학년','4학년','5학년','6학년','중학생'].includes(l)) return l; if(/^중|^고/.test(l)) return '중학생'; if(l === '성인') return ''; return l; }
+const atNormBelt = b => { const p = peParseBeltString(b); return p.type === 'invalid' ? '' : peFormatBelt(p); };
+const atCat = (g) => g === '유치부' ? 0 : /학년$/.test(g) ? 1 : g === '중학생' ? 2 : -1;
+
+async function atConnect(cfg, email, pw){
+  const [{ initializeApp, getApps }, au, fs] = await Promise.all([import(AT_SDK + 'firebase-app.js'), import(AT_SDK + 'firebase-auth.js'), import(AT_SDK + 'firebase-firestore.js')]);
+  const app = getApps().find(a => a.name === 'attend') || initializeApp(cfg, 'attend');
+  const auth = au.getAuth(app);
+  AT.fs = fs; AT.db = fs.getFirestore(app);
+  if(email && pw) await au.signInWithEmailAndPassword(auth, email, pw);
+  return new Promise(res => au.onAuthStateChanged(auth, u => {
+    AT.user = u;
+    if(u){ atListen(); atStatus('✔ 출결 앱과 연결됨 (' + (u.email || '') + ')'); } else atStatus('출결 앱 계정으로 로그인해 주세요');
+    res(!!u);
+  }));
+}
+let atUnsub = null;
+function atListen(){
+  if(atUnsub) return;
+  const { collection, onSnapshot } = AT.fs;
+  atUnsub = onSnapshot(collection(AT.db, 'students'), snap => {
+    AT.students = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    AT.ready = true;
+    if(!atGet(AT_LINKED_KEY, false)) atFirstLink(); else atSchedule();
+  }, e => atStatus('⚠ 출결 데이터를 못 읽었어요: ' + (e.code || e.message)));
+}
+function atSchedule(){ clearTimeout(AT.timer); AT.timer = setTimeout(atSync, 1500); }
+
+/* 처음 연결: 이름(같은 이름은 유치부/초등/중등)으로 짝짓고, 한쪽에만 있는 원생은 고르게 함 */
+function atMatch(){
+  const act = AT.students.filter(s => (s.status || 'ACTIVE') !== 'LEFT');
+  const used = new Set(); const pairs = [];
+  (peRoster || []).forEach(r => {
+    if(r.sid){ const s = act.find(x => x.id === r.sid); if(s){ used.add(s.id); pairs.push([r, s]); } return; }
+    let c = act.filter(s => !used.has(s.id) && String(s.name || '').trim() === String(r.name || '').trim());
+    if(c.length > 1){ const k = atCat(r.grade); const h = c.filter(s => atCat(atToPe(s)) === k); if(h.length === 1) c = h; }
+    if(c.length === 1){ used.add(c[0].id); pairs.push([r, c[0]]); }
+  });
+  return { pairs, peOnly: (peRoster || []).filter(r => !pairs.some(p => p[0] === r) && !r.noSync), fsOnly: act.filter(s => !used.has(s.id)) };
+}
+function atFirstLink(){
+  if(document.getElementById('at-first')) return;
+  const { pairs, peOnly, fsOnly } = atMatch();
+  const diff = pairs.filter(([r, s]) => atNormBelt(s.belt) && peFormatBelt(r.current) !== atNormBelt(s.belt));
+  const box = document.createElement('div'); box.id = 'at-first';
+  box.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:30px 12px';
+  const li = (arr, f, key) => arr.map((x, i) => `<label style="display:inline-flex;gap:4px;align-items:center;margin:3px 10px 3px 0"><input type="checkbox" data-${key}="${i}" checked> ${f(x)}</label>`).join('') || '<span style="opacity:.6">없어요</span>';
+  box.innerHTML = `<div style="background:#fff;color:#111;border-radius:14px;max-width:760px;width:100%;padding:20px">
+    <h3 style="margin:0 0 6px">🔗 출결 앱과 원생 명단 합치기 (처음 한 번)</h3>
+    <p style="font-size:13px;color:#555;margin:0 0 10px">이름이 같은 원생 ${pairs.length}명은 서로 연결했어요. 앞으로 이름·학년·띠를 어디서 고쳐도 맞춰져요. 한쪽에만 있는 원생은 체크한 사람만 다른 쪽에 추가해요.</p>
+    <b>통합관리에만 있는 원생 ${peOnly.length}명 → 출결 앱에 추가</b><div style="margin:4px 0 12px;max-height:150px;overflow:auto">${li(peOnly, r => `${escapeHtml(r.name)} <small style="opacity:.6">${escapeHtml(r.grade || '')} ${escapeHtml(peFormatBelt(r.current))}</small>`, 'pe')}</div>
+    <b>출결 앱에만 있는 원생 ${fsOnly.length}명 → 통합관리에 추가</b><div style="margin:4px 0 12px;max-height:150px;overflow:auto">${li(fsOnly, s => `${escapeHtml(s.name || '')} <small style="opacity:.6">${escapeHtml(atToPe(s))} ${escapeHtml(atNormBelt(s.belt))}</small>`, 'fs')}</div>
+    ${diff.length ? `<b>띠가 서로 다른 원생 ${diff.length}명</b> <small style="opacity:.7">(출결에서 📌직접 고친 띠는 출결 것, 나머지는 통합관리 것으로 맞춰요)</small>
+      <div style="margin:4px 0 12px;max-height:150px;overflow:auto;font-size:13px">${diff.map(([r, s]) => `${escapeHtml(r.name)}: 통합관리 ${escapeHtml(peFormatBelt(r.current))} / 출결 ${escapeHtml(atNormBelt(s.belt))}${s.beltManual ? ' 📌 → <b>출결 것</b>' : ' → <b>통합관리 것</b>'}`).join('<br>')}</div>` : ''}
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn ghost small" id="at-later">나중에</button><button class="btn small" id="at-ok">합치기</button></div></div>`;
+  document.body.appendChild(box);
+  box.querySelector('#at-later').onclick = () => box.remove();
+  box.querySelector('#at-ok').onclick = async () => {
+    const addPe = peOnly.filter((r, i) => box.querySelector(`[data-pe="${i}"]`).checked);
+    const addFs = fsOnly.filter((s, i) => box.querySelector(`[data-fs="${i}"]`).checked);
+    peOnly.filter(r => !addPe.includes(r)).forEach(r => { r.noSync = true; });
+    atSet(AT_SKIP_KEY, fsOnly.filter(s => !addFs.includes(s)).map(s => s.id));
+    // 짝 연결 + 띠 맞추기 기준
+    pairs.forEach(([r, s]) => {
+      r.sid = s.id;
+      const pb = r.current && r.current.type !== 'invalid' ? peFormatBelt(r.current) : '', fb = atNormBelt(s.belt);
+      // 띠: 출결에서 📌직접 고쳤거나 통합관리에 띠가 없으면 출결 것, 그 밖에는 통합관리 것 / 이름·학년: 출결 것
+      if(fb && (!pb || (pb !== fb && s.beltManual))) r.current = peParseBeltString(fb);
+      r.sync = { name: String(r.name || '').trim(), grade: r.grade || '', belt: fb || pb };
+    });
+    addFs.forEach(s => peRoster.push(atNewPe(s)));
+    atSet(AT_LINKED_KEY, true);
+    box.remove();
+    atSaving = true; peSave(); atSaving = false; try{ peRender(); }catch(e){}
+    await atSync();
+    showToast(`출결 앱과 합쳤어요 · 연결 ${pairs.length}명, 출결에 추가 ${addPe.length}명, 통합관리에 추가 ${addFs.length}명`);
+  };
+}
+function atNewPe(s){
+  const b = atNormBelt(s.belt);
+  return { name: String(s.name || '').trim(), grade: atToPe(s), current: b ? peParseBeltString(b) : { type:'invalid', raw:'' }, pass:false, sid: s.id, sync: { name: String(s.name || '').trim(), grade: atToPe(s), belt: b } };
+}
+
+/* 계속 맞추기 (출결이 바뀌거나 통합관리가 저장될 때) */
+let atSaving = false;
+async function atSync(){
+  if(!AT.ready || !AT.user || AT.busy || !atGet(AT_LINKED_KEY, false)) return;
+  AT.busy = true;
+  const { doc, collection, writeBatch, serverTimestamp } = AT.fs;
+  try{
+    const byId = new Map(AT.students.map(s => [s.id, s]));
+    const skip = new Set(atGet(AT_SKIP_KEY, []));
+    const batch = writeBatch(AT.db); let writes = 0, pulled = 0, removed = [];
+    const now = Date.now(), month = new Date().toISOString().slice(0, 7);
+    for(const r of [...peRoster]){
+      if(!r || r.noSync || !r.current) continue;
+      if(!r.sid){
+        // 통합관리에서 새로 추가한 원생 → 출결에 추가
+        const ref = doc(collection(AT.db, 'students'));
+        const pb = peFormatBelt(r.current), age = atAgeOf(r.grade);
+        batch.set(ref, { name: String(r.name).trim(), grade: r.grade || '', age, ageYear: age ? atThisYear() : 0, phones: [], phoneLabels: [], memo: '', siblingKey: '', demo: false,
+          status: 'ACTIVE', statusReason: '', joinedMonth: month, leftMonth: '', order: 0, attendNo: '', school: '', fee: 0,
+          belt: r.current.type === 'invalid' ? '' : pb, beltManual: false, beltAt: now, updatedAt: serverTimestamp() });
+        r.sid = ref.id; r.sync = { name: String(r.name).trim(), grade: r.grade || '', belt: r.current.type === 'invalid' ? '' : pb };
+        writes++; continue;
+      }
+      const s = byId.get(r.sid);
+      if(!s) continue;
+      if((s.status || 'ACTIVE') === 'LEFT'){ removed.push(r); continue; }
+      const base = r.sync || {}; const upd = {};
+      // 이름
+      const sn = String(s.name || '').trim(), rn = String(r.name || '').trim();
+      if(sn !== rn){ if(rn !== base.name && sn === base.name){ upd.name = rn; } else { r.name = sn; pulled++; } }
+      // 학년
+      const sg = atToPe(s), rg = r.grade || '';
+      if(sg !== rg){
+        if(rg !== base.grade && sg === base.grade){ upd.grade = rg; const a = atAgeOf(rg); if(a){ upd.age = a; upd.ageYear = atThisYear(); } else if(atCat(rg) !== atCat(atToPe(s)) || !rg){ upd.age = 0; upd.ageYear = 0; } }
+        else { r.grade = sg; pulled++; }
+      }
+      // 띠 (둘 다 바뀌었으면 나중 것)
+      const sb = atNormBelt(s.belt), rb = r.current.type === 'invalid' ? '' : peFormatBelt(r.current);
+      if(sb !== rb){
+        const peChanged = rb !== (base.belt || ''), fsChanged = sb !== (base.belt || '');
+        const fsWins = !!sb && fsChanged && (!peChanged || !rb || (s.beltAt || 0) > (r.beltAt || 0));   // 빈 띠는 이기지 않음
+        if(fsWins){ if(sb){ r.current = peParseBeltString(sb); r.beltAt = s.beltAt || now; pulled++; } }
+        else if(rb){ upd.belt = rb; upd.beltManual = false; upd.beltAt = now; r.beltAt = now; }
+      }
+      if(Object.keys(upd).length){ upd.updatedAt = serverTimestamp(); batch.set(doc(AT.db, 'students', s.id), upd, { merge: true }); writes++; }
+      r.sync = { name: upd.name || String(r.name).trim(), grade: r.grade || '', belt: r.current.type === 'invalid' ? '' : peFormatBelt(r.current) };
+    }
+    // 출결에서 퇴관 → 통합관리 명단에서 뺌 (지운 내용은 따로 보관)
+    if(removed.length){
+      const keep = atGet(AT_REMOVED_KEY, []); removed.forEach(r => keep.push({ ...r, removedAt: now })); atSet(AT_REMOVED_KEY, keep.slice(-300));
+      peRoster = peRoster.filter(r => !removed.includes(r)); pulled++;
+    }
+    // 출결에서 새로 넣은 원생 → 통합관리에 추가
+    const linked = new Set(peRoster.map(r => r.sid).filter(Boolean));
+    AT.students.filter(s => (s.status || 'ACTIVE') !== 'LEFT' && !linked.has(s.id) && !skip.has(s.id) && String(s.name || '').trim())
+      .forEach(s => { peRoster.push(atNewPe(s)); pulled++; });
+    if(writes) await batch.commit();
+    if(pulled || writes){ atSaving = true; peSave(); atSaving = false; try{ peRender(); }catch(e){} }
+    atStatus(`✔ 출결 앱과 연결됨 · ${new Date().toLocaleTimeString('ko-KR', { hour:'numeric', minute:'2-digit' })} 맞춤` + (pulled ? ` · 받은 변경 ${pulled}` : '') + (writes ? ` · 보낸 변경 ${writes}` : ''));
+  }catch(e){ atStatus('⚠ 맞추다가 문제: ' + (e.code || e.message)); }
+  finally{ AT.busy = false; }
+}
+
+/* 통합관리에서 저장할 때마다 출결로 / 통합관리에서 삭제 → 출결 퇴관 */
+(function(){
+  const orig = peSave;
+  peSave = function(){ orig.apply(this, arguments); if(!atSaving) atSchedule(); };
+  const del = peDeletePerson;
+  peDeletePerson = function(idx){
+    const r = peRoster[idx]; const before = peRoster.length;
+    del.apply(this, arguments);
+    if(r && r.sid && peRoster.length < before && AT.user){
+      if(confirm(`'${r.name}' 님을 출결 앱에서도 퇴관 처리할까요?\n(아니요를 누르면 출결 앱에는 그대로 두고, 통합관리 명단에서만 빠져요)`)){
+        AT.fs.setDoc(AT.fs.doc(AT.db, 'students', r.sid), { status: 'LEFT', statusReason: '통합관리에서 삭제', leftMonth: new Date().toISOString().slice(0, 7) }, { merge: true });
+      } else { const sk = atGet(AT_SKIP_KEY, []); sk.push(r.sid); atSet(AT_SKIP_KEY, sk); }
+    }
+  };
+})();
+
+function atToggle(){ const el = document.getElementById('at-set'); if(el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; }
+async function atLogin(){
+  const code = document.getElementById('at-code').value.trim();
+  const cfg = atParseCode(code) || atGet(AT_CFG_KEY, null);
+  if(!cfg){ showToast('연결 코드를 확인해 주세요 (JD1- 로 시작)'); return; }
+  const email = document.getElementById('at-email').value.trim(), pw = document.getElementById('at-pw').value;
+  atSet(AT_CFG_KEY, cfg);
+  try{ atStatus('연결 중…'); const ok = await atConnect(cfg, email, pw); if(ok){ document.getElementById('at-set').style.display = 'none'; showToast('출결 앱과 연결했어요'); } }
+  catch(e){ const c = e.code || ''; atStatus('⚠ 연결 실패: ' + (c.includes('invalid') || c.includes('wrong') ? '이메일·비밀번호가 달라요' : (e.message || c))); }
+}
+// 이 기기에서 전에 로그인했으면 저절로 다시 연결
+(function(){ const cfg = atGet(AT_CFG_KEY, null); if(cfg) atConnect(cfg).catch(e => atStatus('⚠ ' + (e.message || e))); else atStatus('아직 연결 안 됨 — [연결하기]를 눌러 주세요'); })();
 </script>
 </body>
 </html>
