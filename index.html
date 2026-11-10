@@ -384,13 +384,13 @@
 
   <div class="card" id="bs-card" style="margin:10px 0;padding:12px 14px;">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-      <b>🥋 출결 앱 띠 보내기</b>
+      <b>🥋 출결 앱과 띠 맞추기</b>
       <span id="bs-status" style="font-size:12.5px;color:var(--sub);flex:1;min-width:160px;"></span>
       <button class="btn ghost small" onclick="bsToggle()">설정</button>
       <button class="btn small" onclick="bsPush(true)">지금 보내기</button>
     </div>
     <div id="bs-set" style="display:none;margin-top:8px;">
-      <div class="sub" style="font-size:12.5px;margin-bottom:6px;">통합관리에서 띠가 바뀌면 출결 앱(관장님 폰)에도 저절로 바뀌어요. 아래 비밀번호와 똑같은 비밀번호를 출결 앱 [명단·형제] 탭 맨 위 '통합관리 띠 연동'에 넣어 주세요. 띠 명단은 이 비밀번호로 잠가서 보내요(8자 이상 권장).</div>
+      <div class="sub" style="font-size:12.5px;margin-bottom:6px;">통합관리·출결 앱·PC 어디서 띠를 고쳐도 서로 맞춰져요 (1~2분, 나중에 고친 쪽이 이김). 아래 비밀번호와 똑같은 비밀번호를 출결 앱 [명단·형제] 탭 맨 위 '통합관리 띠 연동'에 넣어 주세요. 띠 명단은 이 비밀번호로 잠가서 보내요(8자 이상 권장).</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
         <input type="password" id="bs-pass" placeholder="연동 비밀번호" style="flex:1;min-width:160px;">
         <button class="btn small" onclick="bsSavePass()">저장하고 보내기</button>
@@ -4195,14 +4195,75 @@ async function bsEncrypt(pw, text){
   return { v:1, n, s:bsB64(salt), i:bsB64(iv), d:bsB64(ct) };
 }
 /* 이름이 같은 아이가 있어서 이름 → 띠 하나로 묶지 않고, [이름·학년·띠] 목록으로 보내요 */
+/* 아이마다 '띠가 바뀐 때'(at)를 기억 → 출결 쪽에서 고친 것과 비교해 나중 것이 이김 */
+const BS_SEEN_KEY = 'tkd_belt_seen_v1';
 function bsBeltMap(){
-  const l = [];
+  let seen = null; try{ seen = JSON.parse(localStorage.getItem(BS_SEEN_KEY) || 'null'); }catch(e){}
+  const first = !seen; seen = seen || {};
+  const now = Date.now(), l = [], keep = {};
   (peRoster || []).forEach(r => {
     if(!r || !r.name || !r.current || r.current.type === 'invalid') return;
-    const t = peFormatBelt(r.current);
-    if(t) l.push({ n: String(r.name).trim(), g: String(r.grade || '').trim(), b: t });
+    const t = peFormatBelt(r.current); if(!t) return;
+    const n = String(r.name).trim(), g = String(r.grade || '').trim(), k = n + '|' + g;
+    const old = seen[k];
+    let at = old && old.b === t ? old.at : (first ? 0 : now);   // 처음 한 번은 '예전부터'(0)로 봄
+    if(r.beltAt && r.beltAt > at && (!old || old.b !== t || r.beltAt >= old.at)) at = r.beltAt;
+    keep[k] = { b: t, at };
+    l.push({ n, g, b: t, at });
   });
+  try{ localStorage.setItem(BS_SEEN_KEY, JSON.stringify(keep)); }catch(e){}
   return l;
+}
+
+/* 출결(폰·PC)에서 직접 고친 띠 받아서 통합관리 명단에 넣기 */
+const BS_BACK_URL = BS_URL.replace('/blob.json', '/back.json');
+const BS_APPLIED_KEY = 'tkd_beltback_applied_v1';
+function bsU8(s){ return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
+async function bsDecrypt(pw, o){
+  const enc = new TextEncoder();
+  const base = await crypto.subtle.importKey('raw', enc.encode(pw), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey({name:'PBKDF2', salt:bsU8(o.s), iterations:o.n || 150000, hash:'SHA-256'}, base, {name:'AES-GCM', length:256}, false, ['decrypt']);
+  return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM', iv:bsU8(o.i)}, key, bsU8(o.d))));
+}
+function bsCat(raw, age){
+  if(age > 0) return age <= 7 ? 0 : age <= 13 ? 1 : age <= 16 ? 2 : age <= 19 ? 3 : 4;
+  const g = String(raw || '').replace(/\s/g, ''); if(!g) return -1;
+  if(/유치|세|살/.test(g)) return 0; if(g.startsWith('중')) return 2; if(g.startsWith('고')) return 3; if(g.includes('성인')) return 4; if(g.startsWith('초') || g.includes('학년')) return 1; return -1;
+}
+let bsBackBusy = false;
+async function bsPullBack(){
+  const pw = bsPass(); if(!pw || bsBackBusy) return;
+  bsBackBusy = true;
+  try{
+    const r = await fetch(BS_BACK_URL, { cache:'no-store' }); if(!r.ok) return;
+    const o = await r.json(); if(!o) return;
+    const data = await bsDecrypt(pw, o);
+    let applied = {}; try{ applied = JSON.parse(localStorage.getItem(BS_APPLIED_KEY) || '{}'); }catch(e){}
+    let seen = {}; try{ seen = JSON.parse(localStorage.getItem(BS_SEEN_KEY) || '{}'); }catch(e){}
+    const changed = [];
+    (data.l || []).forEach(e => {
+      const n = String(e.n || '').trim(), at = +e.at || 1, cur = peParseBeltString(e.b);
+      if(!n || cur.type === 'invalid') return;
+      const ak = n + '|' + (e.g || '') + '|' + (e.a || 0);
+      if((applied[ak] || 0) >= at) return;                         // 이미 받은 것
+      let rows = (peRoster || []).filter(x => x && String(x.name).trim() === n);
+      if(rows.length > 1){ const c = bsCat(e.g, +e.a || 0); const hit = rows.filter(x => bsCat(x.grade, 0) === c); if(hit.length === 1) rows = hit; }
+      applied[ak] = at;
+      if(rows.length !== 1) return;                                 // 못 찾거나 구분이 안 되면 건너뜀
+      const row = rows[0], k = n + '|' + String(row.grade || '').trim();
+      const mine = seen[k] ? seen[k].at : 0;
+      if(mine > at) return;                                         // 통합관리에서 그 뒤에 또 바꿨으면 통합관리 것이 이김
+      if(peFormatBelt(row.current) === peFormatBelt(cur)) return;
+      row.current = cur; row.beltAt = Date.now();
+      changed.push(`${n} → ${peFormatBelt(cur)}`);
+    });
+    try{ localStorage.setItem(BS_APPLIED_KEY, JSON.stringify(applied)); }catch(e){}
+    if(changed.length){
+      peSave(); try{ peRender(); }catch(e){}
+      showToast(`출결 앱에서 고친 띠 ${changed.length}명을 반영했어요: ${changed.slice(0, 5).join(', ')}${changed.length > 5 ? ' …' : ''}`);
+    }
+  }catch(e){ /* 비밀번호가 다르거나 인터넷 문제 → 다음에 다시 */ }
+  finally{ bsBackBusy = false; }
 }
 function bsSetStatus(t){ const el = document.getElementById('bs-status'); if(el) el.textContent = t; }
 function bsPass(){ try{ return localStorage.getItem(BS_PASS_KEY) || ''; }catch(e){ return ''; } }
@@ -4250,8 +4311,8 @@ function bsSavePass(){
     const at = parseInt(localStorage.getItem('jdbelt_at'), 10);
     bsSetStatus(bsPass() ? (at ? `마지막으로 보낸 때: ${new Date(at).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'})}` : '') : '비밀번호를 넣으면 출결 앱으로 띠가 자동으로 가요');
   }catch(e){}
-  setTimeout(() => bsPush(false), 4000);
-  setInterval(() => bsPush(false), 60000);
+  setTimeout(() => bsPullBack().then(() => bsPush(false)), 3000);
+  setInterval(() => bsPullBack().then(() => bsPush(false)), 60000);
 })();
 </script>
 </body>
